@@ -27,7 +27,12 @@ source_group("CLI" FILES ${EPANET_CLI_SOURCES})
 # Creates the EPANET command line executable
 add_executable(runepanet ${EPANET_CLI_SOURCES})
 if(NOT WIN32)
-    target_link_libraries(runepanet LINK_PUBLIC epanet2 m)
+target_link_libraries(runepanet LINK_PUBLIC epanet2 m)
 else(NOT WIN32)
-    target_link_libraries(runepanet LINK_PUBLIC epanet2)
+target_link_libraries(runepanet LINK_PUBLIC epanet2)
 endif(NOT WIN32)
+
+target_include_directories(runepanet PRIVATE 
+  include
+  ${CMAKE_SOURCE_DIR}/src
+)

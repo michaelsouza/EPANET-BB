@@ -1,0 +1,57 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-debug",
+            "type": "shell",
+            "command": "make BUILD_TYPE=debug",
+            "options": {
+                "cwd": "${workspaceFolder}/build"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "clang-format",
+            "type": "shell",
+            "command": "clang-format",
+            "args": [
+                "-i",
+                "${workspaceFolder}/run/*.c",
+                "${workspaceFolder}/run/*.h"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "silent"
+            },
+            "problemMatcher": []
+        },
+        // Generates prompts from a YAML file using prompt-generator tool
+        {
+            "label": "pgen",
+            "type": "shell",
+            "command": "../prompt-generator/.venv/bin/python ../prompt-generator/pgen.py prompt.yml",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        // Same as pgen but includes git diff information in the prompt
+        {
+            "label": "pgen git",
+            "type": "shell",
+            "command": "../prompt-generator/.venv/bin/python ../prompt-generator/pgen.py prompt.yml --gitdiff",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,2 @@
+void createtmpfiles();
+void removetmpfiles();

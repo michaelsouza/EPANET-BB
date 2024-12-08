@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "epanet2.h": "c",
+        "stdio.h": "c",
+        "epanet2_2.h": "c",
+        "types.h": "c"
+    }
+}
