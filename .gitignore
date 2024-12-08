@@ -226,7 +226,7 @@ tests/data/
 tests/outfile/data/en*
 
 
-#Cmake stuff
+# Cmake stuff
 __cmake_systeminformation/
 buildprod*/
 *_export.h
@@ -234,3 +234,7 @@ buildprod*/
 
 # git merge
 *.orig
+
+# Auto-generated files
+prompt_content.json
+�

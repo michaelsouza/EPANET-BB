@@ -17,6 +17,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "epanet2.h"
 #include "epanet2_2.h"
@@ -32,23 +33,53 @@ typedef struct {
   char id[MAXID];
   int index;
   double level;
+  double min_level;
+  double max_level;
 } BBTank;
 
+typedef struct {
+  char id[MAXID];
+  int index;  
+} BBNode;
+
+typedef struct {
+  int num_pumps;
+  int num_tanks;
+  int prices_index;
+  BBPump *pumps;
+  BBTank *tanks;
+  BBNode *nodes;
+} BBProject;
+
 void writeConsole(char *s) {
-  fprintf(stdout, "\r%s", s);
+  fprintf(stdout, "%s\n", s);
   fflush(stdout);
 }
 
 void BB_show_pump(EN_Project p, BBPump *pump) {
   // sprintf(p->Msg, "Pump %s has index %d and pattern index %d", pump->id,
   // pump->index, pump->pattern_index); writewin(p->viewprog, p->Msg);
-  printf("%3s has index %d and pattern index %d\n", pump->id, pump->index,
+  printf("Pump[%3s] has index %d and pattern index %d\n", pump->id, pump->index,
          pump->pattern_index);
 }
 
 void BB_show_tank(EN_Project p, BBTank *tank) {
-  printf("%3s has index %d and level %6.2f\n", tank->id, tank->index,
+  printf("Tank[%3s] has index %d and level %6.2f\n", tank->id, tank->index,
          tank->level);
+}
+
+void BB_show_node(EN_Project p, BBNode *node) {
+  printf("Node[%3s] has index %d\n", node->id, node->index);
+}
+
+void BB_show_header(char *title) {
+  int len = strlen(title);
+  int total_len = 50 - len;
+  printf("%s ", title);
+  for (int i = 0; i < total_len; i++) {
+    printf("=");
+  }
+  printf("\n");
 }
 
 int BB_open(Project *p, const char *inpFile, const char *rptFile,
@@ -65,7 +96,65 @@ int BB_open(Project *p, const char *inpFile, const char *rptFile,
   return errcode;
 }
 
-int BB_solveH(EN_Project p)
+void BB_init(EN_Project p, int hour, int **x) {}
+
+void BB_new(EN_Project p, BBProject *bb_prj) {
+  BB_show_header("BB_new");
+  // Create pumps ====================================================
+  const int num_pumps = 3;
+  bb_prj->num_pumps = num_pumps;
+  bb_prj->pumps = (BBPump*)malloc(num_pumps * sizeof(BBPump));
+  
+  strncpy(bb_prj->pumps[0].id, "111", MAXID);
+  strncpy(bb_prj->pumps[1].id, "222", MAXID); 
+  strncpy(bb_prj->pumps[2].id, "333", MAXID);
+  
+  for (int i = 0; i < num_pumps; i++) {
+    EN_getlinkindex(p, bb_prj->pumps[i].id, &bb_prj->pumps[i].index);
+    char pattern_id[MAXID];
+    sprintf(pattern_id, "PMP%s", bb_prj->pumps[i].id);
+    EN_getpatternindex(p, pattern_id, &bb_prj->pumps[i].pattern_index);
+    // Show pump
+    BB_show_pump(p, &bb_prj->pumps[i]);
+  }
+
+  // Create tanks ====================================================
+  const int num_tanks = 3;
+  bb_prj->num_tanks = num_tanks;
+  bb_prj->tanks = (BBTank*)malloc(num_tanks * sizeof(BBTank));
+  
+  strncpy(bb_prj->tanks[0].id, "65", MAXID);
+  strncpy(bb_prj->tanks[1].id, "165", MAXID);
+  strncpy(bb_prj->tanks[2].id, "265", MAXID);
+  
+  for (int i = 0; i < num_tanks; i++) {
+    EN_getnodeindex(p, bb_prj->tanks[i].id, &bb_prj->tanks[i].index);
+    EN_getnodevalue(p, bb_prj->tanks[i].index, EN_TANKLEVEL, &bb_prj->tanks[i].level);
+    BB_show_tank(p, &bb_prj->tanks[i]);
+  }
+
+  // Create nodes ====================================================
+  const int num_nodes = 3;
+  bb_prj->nodes = (BBNode*)malloc(num_nodes * sizeof(BBNode));
+  strncpy(bb_prj->nodes[0].id, "55", MAXID);
+  strncpy(bb_prj->nodes[1].id, "90", MAXID);
+  strncpy(bb_prj->nodes[2].id, "170", MAXID);
+  for (int i = 0; i < num_nodes; i++) {
+    EN_getnodeindex(p, bb_prj->nodes[i].id, &bb_prj->nodes[i].index);
+    BB_show_node(p, &bb_prj->nodes[i]);
+  }
+
+  // Get prices =======================================================
+  EN_getpatternindex(p, "PRICES", &bb_prj->prices_index);
+}
+
+void BB_free(BBProject *project) {
+  free(project->pumps);
+  free(project->tanks);
+  free(project->nodes);
+}
+
+int BB_solveH(EN_Project p, BBProject *bb)
 /*----------------------------------------------------------------
  **  Input:   none
  **  Output:  none
@@ -74,39 +163,8 @@ int BB_solveH(EN_Project p)
  **----------------------------------------------------------------
  */
 {
-  int errcode;
+  int errcode = 0;
   long t, tstep;
-
-  // Create pumps ====================================================
-  const int num_pumps = 3;
-  BBPump pumps[num_pumps];
-  strncpy(pumps[0].id, "111", MAXID);
-  strncpy(pumps[1].id, "222", MAXID);
-  strncpy(pumps[2].id, "333", MAXID);
-  for (int i = 0; i < num_pumps; i++) {
-    EN_getlinkindex(p, pumps[i].id, &pumps[i].index);
-    char pattern_id[MAXID];
-    sprintf(pattern_id, "PMP%s", pumps[i].id);
-    EN_getpatternindex(p, pattern_id, &pumps[i].pattern_index);
-    // Show pump
-    BB_show_pump(p, &pumps[i]);
-  }
-
-  // Create tanks ====================================================
-  const int num_tanks = 3;
-  BBTank tanks[num_tanks];
-  strncpy(tanks[0].id, "65", MAXID);
-  strncpy(tanks[1].id, "165", MAXID);
-  strncpy(tanks[2].id, "265", MAXID);
-  for (int i = 0; i < num_tanks; i++) {
-    EN_getnodeindex(p, tanks[i].id, &tanks[i].index);
-    EN_getnodevalue(p, tanks[i].index, EN_TANKLEVEL, &tanks[i].level);
-    BB_show_tank(p, &tanks[i]);
-  }
-
-  // Get prices =======================================================
-  int prices_index;
-  EN_getpatternindex(p, "PRICES", &prices_index);
 
   // Open hydraulics solver ===========================================
   EN_openH(p);
@@ -147,8 +205,8 @@ int BB_solveH(EN_Project p)
       }
 
       // Get tank levels ==================================================
-      for (int i = 0; i < num_tanks; i++) {
-        BBTank *tank = &tanks[i];
+      for (int i = 0; i < bb->num_tanks; i++) {
+        BBTank *tank = &bb->tanks[i];
         EN_getnodevalue(p, tank->index, EN_TANKLEVEL, &tank->level);
         BB_show_tank(p, tank);
       }
@@ -156,11 +214,11 @@ int BB_solveH(EN_Project p)
 
       // Get pump costs ==================================================
       int hora = (int)floor(t / 3600.0);
-      for (int i = 0; i < num_pumps; i++) {
-        BBPump *pump = &pumps[i];
+      for (int i = 0; i < bb->num_pumps; i++) {
+        BBPump *pump = &bb->pumps[i];
         double energy = 0.0, price = 0.0;
         EN_getlinkvalue(p, pump->index, EN_ENERGY, &energy);
-        EN_getpatternvalue(p, prices_index, hora + 1, &price);
+        EN_getpatternvalue(p, bb->prices_index, hora + 1, &price);
         double cost = (tstep / 3600.0) * energy * price;
         total_cost += cost;
         printf("Pump[%3s] energy %6.2f price %6.2f cost %6.2f\n", pump->id,
@@ -227,6 +285,16 @@ int main(int argc, char *argv[])
 
   Project p;
   BB_open(&p, f1, f2, f3);
-  BB_solveH(&p);
+  
+  BBProject bb; 
+  BB_new(&p, &bb);
+
+  errcode = BB_solveH(&p, &bb);
+  if (errcode) {
+    printf("Error[%d] The hydraulic solver failed.", errcode);
+    return errcode;
+  }
+
+  BB_free(&bb);
   EN_close(&p);
 }
