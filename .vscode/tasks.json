@@ -8,6 +8,7 @@
             "options": {
                 "cwd": "${workspaceFolder}/build"
             },
+            "dependsOn": ["clang-format"],
             "group": {
                 "kind": "build",
                 "isDefault": false
@@ -22,6 +23,7 @@
             "command": "clang-format",
             "args": [
                 "-i",
+                "--style={ColumnLimit: 120}",
                 "${workspaceFolder}/run/*.c",
                 "${workspaceFolder}/run/*.h"
             ],
