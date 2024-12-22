@@ -1,16 +1,3 @@
-/*
- ******************************************************************************
- Project:      OWA EPANET
- Version:      2.2
- Module:       main.c
- Description:  main stub for a command line executable version of EPANET
- Authors:      see AUTHORS
- Copyright:    see AUTHORS
- License:      see LICENSE
- Last Updated: 12/07/2018
- ******************************************************************************
-*/
-
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -171,7 +158,7 @@ void BB_free(BBData *bb) {
 void BB_update(Project *p, BBData *bb) {
   BB_show_section_title("BB_update");
 
-  // Update tank levels
+  // Copy values from the project "p" to the BBData "bb"
   for (int i = 0; i < bb->num_tanks; i++) {
     BBTank *tank = &bb->tanks[i];
     EN_getnodevalue(p, tank->index, EN_TANKLEVEL, &tank->level[bb->hour]);
@@ -195,7 +182,7 @@ int BB_solveH(Project *p, BBData *bb) {
     }
 
     // Analyze each hydraulic time period
-    tstep = 1; // Arbitrary non-zero value
+    tstep = 1; // Arbitrary non-zero value, just to start
     while (tstep > 0) {
       // Display progress message
       // sprintf(p->Msg, "%-10s", clocktime(p->report.Atime, p->times.Htime));
