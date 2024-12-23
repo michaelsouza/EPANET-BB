@@ -4,9 +4,9 @@
         {
             "label": "build-debug",
             "type": "shell",
-            "command": "make BUILD_TYPE=debug",
+            "command": "make MODE=debug",
             "options": {
-                "cwd": "${workspaceFolder}/build"
+                "cwd": "${workspaceFolder}"
             },
             "dependsOn": ["clang-format"],
             "group": {

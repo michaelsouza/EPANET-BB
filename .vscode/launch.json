@@ -8,14 +8,10 @@
             "name": "Debug EPANET",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/runepanet",
-            "args": [
-                "/home/michael/gitrepos/rs_JESSICA/networks/any-town.inp",                
-                "/home/michael/gitrepos/EPANET/build/bin/any-town.rpt",
-                "/home/michael/gitrepos/EPANET/build/bin/any-town.out"
-            ],
+            "program": "${workspaceFolder}/build/debug/main_debug",
+            "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/debug",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
