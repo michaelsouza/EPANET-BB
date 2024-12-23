@@ -238,3 +238,7 @@ buildprod*/
 # Auto-generated files
 prompt_content.json
 �
+example-networks/any-town.rpt
+gdb.txt
+run/main_old.c
+tree.txt

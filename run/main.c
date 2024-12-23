@@ -1,301 +1,280 @@
-#include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "epanet2_2.h"
+#include <math.h>
 #include "types.h"
+#include "epanet2_2.h"
 
-#include "bb.h"
+#define NUM_PUMPS 3       // We have 3 pumps: "55", "90", "170"
+#define MAX_HOURS 24
 
-void writeConsole(char *s) {
-  fprintf(stdout, "%s\n", s);
-  fflush(stdout);
-}
+static int pumpLinkIds[NUM_PUMPS];
+static double bestEnergyCost = 1.0e12;  // large initial value
 
-void BB_show_pump(BBPump *pump) {
-  printf("Pump[%3s] has index %d and pattern index %d\n", pump->id, pump->index, pump->pattern_index);
-}
+// Function prototypes
+int initializeSystem(EN_Project ph, const char *inpFile);
+int closeSystem(EN_Project ph);
+int runHour(EN_Project ph, int hourIndex, int pumpStateCombo, double prevCost);
+void branchAndBound(EN_Project ph, int hourIndex, double prevCost);
+double calculateHourEnergyCost(EN_Project ph, int hourIndex);
+void setPumpStates(EN_Project ph, int combo);
+void viewer(char *s);
 
-void BB_show_tank(BBTank *tank) {
-  printf("Tank[%3s] has index %d and level %6.2f\n", tank->id, tank->index, tank->level[0]);
-}
-
-void BB_show_node(BBNode *node) { printf("Node[%3s] has index %d\n", node->id, node->index); }
-
-void BB_show_section_title(char *title) {
-  int len = strlen(title);
-  int total_len = 50 - len;
-  printf("%s ", title);
-  for (int i = 0; i < total_len; i++) {
-    printf("=");
-  }
-  printf("\n");
-}
-
-int BB_load(Project *p, const char *inpFile, const char *rptFile, const char *outFile) {
-  // Read in project data from an input file
-  int errcode;
-  p->viewprog = &writeConsole;
-  errcode = EN_open(p, inpFile, rptFile, outFile);
-  if (errcode > 100) {
-    printf("Error[%d] The project file is not valid.\n", errcode);
-    printf(" inpFile: %s\n", inpFile);
-    printf(" rptFile: %s\n", rptFile);
-  }
-  return errcode;
-}
-
-void BB_init01H(EN_Project p, BBData *bb, int hour) {
-  BB_show_section_title("BB_init01H");
-
-  // Set time parameters (start time, duration)
-  bb->hour = hour;
-  EN_settimeparam(p, EN_STARTTIME, (hour - 1) * 3600); // start time in seconds
-  EN_settimeparam(p, EN_DURATION, 3600);               // duration in seconds
-
-  // Set initial water levels for each tank using previous hour's levels
-  if (hour > 0) {
-    for (int i = 0; i < bb->num_tanks; i++) {
-      BBTank *tank = &bb->tanks[i];
-      const double level = tank->level[hour - 1]; // previous hour's level
-      EN_setnodevalue(p, tank->index, EN_TANKLEVEL, level);
-    }
-  }
-
-  // Config pumps (pattern:speed)
-  for (int i = 0; i < bb->num_pumps; i++) {
-    BBPump *pump = &bb->pumps[i];
-    int period = hour - 1;
-    EN_setpatternvalue(p, pump->pattern_index, period, pump->pattern_values[period]);
-  }
-}
-
-void BB_new(BBData *bb, char *inpFile, char *rptFile, char *outFile, int num_hours) {
-  BB_show_section_title("BB_new");
-
-  int errcode;
-  Project p;
-  BB_load(&p, inpFile, rptFile, outFile);
-
-  bb->num_hours = num_hours;
-
-  // Create pumps ====================================================
-  const int num_pumps = 3;
-  bb->num_pumps = num_pumps;
-  bb->pumps = (BBPump *)malloc(num_pumps * sizeof(BBPump));
-
-  strncpy(bb->pumps[0].id, "111", MAXID);
-  strncpy(bb->pumps[1].id, "222", MAXID);
-  strncpy(bb->pumps[2].id, "333", MAXID);
-
-  for (int i = 0; i < num_pumps; i++) {
-    BBPump *pump = &bb->pumps[i];
-    // Get pump index
-    EN_getlinkindex(&p, pump->id, &pump->index);
-    // Get pattern index
-    char pattern_id[MAXID];
-    snprintf(pattern_id, MAXID, "PMP%.27s", pump->id);
-    EN_getpatternindex(&p, pattern_id, &pump->pattern_index);
-    // Allocate memory for pattern values
-    pump->pattern_values = (double *)malloc(num_hours * sizeof(double));
-    for (int period = 0; period < num_hours; period++) {
-      EN_getpatternvalue(&p, pump->pattern_index, period, &pump->pattern_values[period]);
-    }
-    // Show pump
-    BB_show_pump(pump);
-  }
-
-  // Create tanks ====================================================
-  const int num_tanks = 3;
-  bb->num_tanks = num_tanks;
-  bb->tanks = (BBTank *)malloc(num_tanks * sizeof(BBTank));
-
-  strncpy(bb->tanks[0].id, "65", MAXID);
-  strncpy(bb->tanks[1].id, "165", MAXID);
-  strncpy(bb->tanks[2].id, "265", MAXID);
-
-  for (int i = 0; i < num_tanks; i++) {
-    BBTank *tank = &bb->tanks[i];
-    // allocate memory for tank level
-    tank->level = (double *)malloc(num_hours * sizeof(double));
-    EN_getnodeindex(&p, tank->id, &tank->index);
-    EN_getnodevalue(&p, tank->index, EN_TANKLEVEL, &tank->level[0]);
-    BB_show_tank(tank);
-  }
-
-  // Create nodes ====================================================
-  const int num_nodes = 3;
-  bb->nodes = (BBNode *)malloc(num_nodes * sizeof(BBNode));
-  strncpy(bb->nodes[0].id, "55", MAXID);
-  strncpy(bb->nodes[1].id, "90", MAXID);
-  strncpy(bb->nodes[2].id, "170", MAXID);
-  for (int i = 0; i < num_nodes; i++) {
-    BBNode *node = &bb->nodes[i];
-    EN_getnodeindex(&p, node->id, &node->index);
-    BB_show_node(node);
-  }
-
-  // Get prices =======================================================
-  EN_getpatternindex(&p, "PRICES", &bb->prices_index);
-
-  EN_close(&p);
-}
-
-void BB_free(BBData *bb) {
-  for (int i = 0; i < bb->num_tanks; i++) {
-    free(bb->tanks[i].level);
-  }
-  for (int i = 0; i < bb->num_pumps; i++) {
-    free(bb->pumps[i].pattern_values);
-  }
-  free(bb->pumps);
-  free(bb->tanks);
-  free(bb->nodes);
-}
-
-void BB_update(Project *p, BBData *bb) {
-  BB_show_section_title("BB_update");
-
-  // Copy values from the project "p" to the BBData "bb"
-  for (int i = 0; i < bb->num_tanks; i++) {
-    BBTank *tank = &bb->tanks[i];
-    EN_getnodevalue(p, tank->index, EN_TANKLEVEL, &tank->level[bb->hour]);
-    BB_show_tank(tank);
-  }
-}
-
-int BB_solveH(Project *p, BBData *bb) {
-  int errcode = 0;
-  long t = 0, tstep;
-
-  // Open hydraulics solver ===========================================
-  EN_openH(p);
-  double total_cost = 0.0;
-  if (!errcode) {
-    // Initialize hydraulics
-    errcode = EN_initH(p, EN_NOSAVE);
-    if (errcode) {
-      printf("Error[%d] The hydraulic solver failed to initialize.", errcode);
-      return errcode;
-    }
-
-    // Analyze each hydraulic time period
-    tstep = 1; // Arbitrary non-zero value, just to start
-    while (tstep > 0) {
-      // Display progress message
-      // sprintf(p->Msg, "%-10s", clocktime(p->report.Atime, p->times.Htime));
-      // sprintf(p->Msg, FMT101, p->report.Atime);
-      // writewin(p->viewprog, p->Msg);
-
-      BB_show_section_title("BB_solveH: iteration");
-      printf("t: %5ld, tstep: %5ld\n", t, tstep);
-
-      // Solve for hydraulics & advance to next time period
-      tstep = 0;
-      errcode = EN_runH(p, &t);
-      if (errcode) {
-        printf("Error[%d] The hydraulic solver failed.", errcode);
-        break;
-      }
-
-      // tstep determines the length of time until the next hydraulic event
-      // occurs in an extended period simulation. The current solution is valid
-      // for [t, t+tstep].
-      errcode = EN_nextH(p, &tstep);
-      if (errcode) {
-        printf("Error[%d] The hydraulic solver failed.", errcode);
-        break;
-      }
-
-      // Get tank levels ==================================================
-      for (int i = 0; i < bb->num_tanks; i++) {
-        BBTank *tank = &bb->tanks[i];
-        double level;
-        EN_getnodevalue(p, tank->index, EN_TANKLEVEL, &level);
-        printf("Tank[%3s] level %6.2f\n", tank->id, level);
-      }
-      // =================================================================
-
-      // Get pump costs ==================================================
-      int hora = (int)floor(t / 3600.0);
-      for (int i = 0; i < bb->num_pumps; i++) {
-        BBPump *pump = &bb->pumps[i];
-        double energy = 0.0, price = 0.0;
-        EN_getlinkvalue(p, pump->index, EN_ENERGY, &energy);
-        EN_getpatternvalue(p, bb->prices_index, hora + 1, &price);
-        double cost = (tstep / 3600.0) * energy * price;
-        total_cost += cost;
-        printf("Pump[%3s] energy %6.2f price %6.2f cost %6.2f\n", pump->id, energy, price, cost);
-      }
-      printf("total_cost %6.2f\n\n", total_cost);
-      // =================================================================
-    }
-  }
-
-  // Update tank levels
-  BB_update(p, bb);
-
-  // Close hydraulics solver
-  EN_closeH(p);
-  errcode = MAX(errcode, p->Warnflag);
-  return errcode;
-}
-
-int main(int argc, char *argv[]) {
-  char *inpFile, *rptFile, *outFile;
-  char blank[] = "";
-  char errmsg[256] = "";
-  int errcode = 0;
-  int version;
-  int major;
-  int minor;
-  int patch;
-
-  // Check for proper number of command line arguments
-  if (argc < 3) {
-    printf("\nUsage:\n %s <input_filename> <report_filename> "
-           "[<binary_filename>]\n",
-           argv[0]);
-    return 0;
-  }
-
-  // Get version number and display in Major.Minor.Patch format
-  EN_getversion(&version);
-  major = version / 10000;
-  minor = (version % 10000) / 100;
-  patch = version % 100;
-  printf("\n... Running EPANET Version %d.%d.%d\n", major, minor, patch);
-
-  // Assign pointers to file names
-  inpFile = argv[1];
-  rptFile = argv[2];
-  if (argc > 3)
-    outFile = argv[3];
-  else
-    outFile = blank;
-
-  BBData bb;
-  BB_new(&bb, inpFile, rptFile, outFile, 24);
-
-  Project p;
-  BB_load(&p, inpFile, rptFile, outFile);
-  BB_solveH(&p, &bb);
-  if (errcode) {
-    printf("Error[%d] The hydraulic solver failed.", errcode);
-    return errcode;
-  }
-  EN_close(&p);
-
-  for (int hour = 0; hour < 24; ++hour) {
+//-------------------------------------------------------------------
+// Main
+//-------------------------------------------------------------------
+int main(void)
+{
+    int err;
     Project p;
-    BB_load(&p, inpFile, rptFile, outFile);
-    BB_init01H(&p, &bb, hour);
-    BB_solveH(&p, &bb);
-    BB_update(&p, &bb);
-    EN_close(&p);
-  }
+    EN_Project ph = &p;
+    ph->viewprog = viewer; // set project viewer
 
-  BB_free(&bb);
+    // 1) Initialize system
+    err = initializeSystem(ph, "/home/michael/gitrepos/EPANET-BB/example-networks/any-town.inp");
+    if (err) {
+        printf("Initialization error, code = %d\n", err);
+        return -1;
+    }
+
+    // 2) We’ll solve hour 0 for each possible pump combination,
+    //    then recursively branch & bound for hours [1..23].
+    for (int combo = 0; combo < 8; combo++) {
+        printf("\n--- Starting hour 0 run with combo = %d ---\n", combo);
+        // Start cost is 0 for the new branch
+        runHour(ph, 0, combo, 0.0);
+
+        double startCost = calculateHourEnergyCost(ph, 0);
+        printf("Hour 0 cost with combo %d = %f\n", combo, startCost);
+
+        // Now branch from hour 1 onward
+        branchAndBound(ph, 1, startCost);
+    }
+
+    // 3) Close system
+    closeSystem(ph);
+
+    printf("\nBest total energy cost found = %lf\n", bestEnergyCost);
+    return EXIT_SUCCESS;
+}
+
+// Viewer function to display messages
+void viewer(char *s)
+{
+    if (s) {
+        printf("%s\n", s);
+    }
+}
+
+//-------------------------------------------------------------------
+// initializeSystem:
+//   - opens EPANET project
+//   - maps pump IDs to indices
+//-------------------------------------------------------------------
+int initializeSystem(EN_Project ph, const char *inpFile)
+{
+    int err;
+    char rptFile[256];
+    char outFile[256];
+
+    snprintf(rptFile, sizeof(rptFile), "%s", inpFile);
+    snprintf(outFile, sizeof(outFile), "%s", inpFile);
+
+    char *ext = strrchr(rptFile, '.');
+    if (ext) {
+        strcpy(ext, ".rpt");
+    }
+    ext = strrchr(outFile, '.');
+    if (ext) {
+        strcpy(ext, ".out");
+    }
+
+    err = EN_open(ph, inpFile, rptFile, outFile);
+    if (err) {
+        printf("Error opening EPANET project, code = %d\n", err);
+        return err;
+    }
+
+    // Retrieve pump indices
+    err = EN_getlinkindex(ph, "111", &pumpLinkIds[0]); if (err) return err;
+    err = EN_getlinkindex(ph, "222", &pumpLinkIds[1]); if (err) return err;
+    err = EN_getlinkindex(ph, "333", &pumpLinkIds[2]); if (err) return err;
+
+    printf("Initialization successful. Pump indices: 111 -> %d, 222 -> %d, 333 -> %d\n",
+           pumpLinkIds[0], pumpLinkIds[1], pumpLinkIds[2]);
+
+    return 0;
+}
+
+//-------------------------------------------------------------------
+// closeSystem:
+//   finalize usage of EPANET
+//-------------------------------------------------------------------
+int closeSystem(EN_Project ph)
+{
+    EN_close(ph);
+    printf("System closed.\n");
+    return 0;
+}
+
+//-------------------------------------------------------------------
+// runHour:
+//   - loads hydraulics file from hourIndex-1
+//   - sets pump states from combo
+//   - runs single hour
+//   - saves .hyd file for hourIndex
+//-------------------------------------------------------------------
+int runHour(EN_Project ph, int hourIndex, int pumpStateCombo, double prevCost)
+{
+    int err = 0;
+    long t = 0;
+
+    printf("\n[runHour] hourIndex = %d, combo = %d, prevCost = %f\n", hourIndex, pumpStateCombo, prevCost);
+
+    if (hourIndex > 0) {
+        char prevFile[64];
+        sprintf(prevFile, "hour%d.hyd", hourIndex - 1);
+
+        err = EN_usehydfile(ph, prevFile);
+        if (err) {
+            printf("Error using previous .hyd file (%s). Code = %d\n", prevFile, err);
+            return err;
+        }
+
+        err = EN_openH(ph);
+        if (err) {
+            printf("Error opening hydraulics in read mode for hour %d. Code = %d\n", hourIndex, err);
+            return err;
+        }
+        EN_closeH(ph);
+    }
+
+    // Open in write mode
+    err = EN_openH(ph);
+    if (err) {
+        printf("Error opening hydraulics in write mode for hour %d. Code = %d\n", hourIndex, err);
+        return err;
+    }
+
+    err = EN_initH(ph, 0);
+    if (err) {
+        printf("Error initH for hour %d. Code = %d\n", hourIndex, err);
+        EN_closeH(ph);
+        return err;
+    }
+
+    // Now set the pumps
+    setPumpStates(ph, pumpStateCombo);
+
+    err = EN_runH(ph, &t);
+    if (err) {
+        printf("Error running hydraulics for hour %d. Code = %d\n", hourIndex, err);
+        EN_closeH(ph);
+        return err;
+    }
+
+    char hydFile[64];
+    sprintf(hydFile, "hour%d.hyd", hourIndex);
+    err = EN_savehydfile(ph, hydFile);
+    if (err) {
+        printf("Error saving hydraulics file for hour %d. Code = %d\n", hourIndex, err);
+        EN_closeH(ph);
+        return err;
+    }
+    printf("[runHour] Saved .hyd file: %s\n", hydFile);
+
+    EN_closeH(ph);
+    return 0;
+}
+
+//-------------------------------------------------------------------
+// branchAndBound:
+//   - recursion from hourIndex to hourIndex+1
+//-------------------------------------------------------------------
+void branchAndBound(EN_Project ph, int hourIndex, double prevCost)
+{
+    if (hourIndex >= MAX_HOURS) {
+        // We finished 24 hours
+        if (prevCost < bestEnergyCost) {
+            bestEnergyCost = prevCost;
+            printf("[branchAndBound] Found a new best cost at hour %d -> %f\n", hourIndex, bestEnergyCost);
+        }
+        return;
+    }
+
+    for (int combo = 0; combo < 8; combo++) {
+        int err = runHour(ph, hourIndex, combo, prevCost);
+        if (err) {
+            printf("[branchAndBound] Error in runHour for hour=%d, combo=%d.\n", hourIndex, combo);
+            continue;
+        }
+
+        double hourCost = calculateHourEnergyCost(ph, hourIndex);
+        double totalCost = prevCost + hourCost;
+
+        printf("[branchAndBound] hourIndex=%d, combo=%d, hourCost=%f, totalCost=%f\n",
+               hourIndex, combo, hourCost, totalCost);
+
+        if (totalCost >= bestEnergyCost) {
+            // Prune
+            // You can print a message if you want to see pruning in action:
+            // printf("[branchAndBound] Pruning branch: cost %f >= bestKnown %f\n", totalCost, bestEnergyCost);
+            continue;
+        }
+
+        branchAndBound(ph, hourIndex + 1, totalCost);
+    }
+}
+
+//-------------------------------------------------------------------
+// calculateHourEnergyCost:
+//   - simplistic placeholder for real energy cost
+//-------------------------------------------------------------------
+double calculateHourEnergyCost(EN_Project ph, int hourIndex)
+{
+    int err;
+    double totalCost = 0.0;
+    char hydFile[64];
+    sprintf(hydFile, "hour%d.hyd", hourIndex);
+
+    err = EN_usehydfile(ph, hydFile);
+    if (err) {
+        printf("[calculateHourEnergyCost] Error reading .hyd file %s, code = %d\n", hydFile, err);
+        return 1.0e12;
+    }
+
+    err = EN_openH(ph);
+    if (err) {
+        printf("[calculateHourEnergyCost] Error opening hydraulics in read mode for hour %d, code=%d\n", hourIndex, err);
+        return 1.0e12;
+    }
+
+    // For each pump, check if it’s ON
+    for (int i = 0; i < NUM_PUMPS; i++) {
+        double setting = 0.0;
+        err = EN_getlinkvalue(ph, pumpLinkIds[i], EN_SETTING, &setting);
+        if (!err && setting > 0.5) {
+            totalCost += 10.0; // placeholder
+        }
+    }
+
+    EN_closeH(ph);
+    printf("[calculateHourEnergyCost] hourIndex=%d, computed cost=%f\n", hourIndex, totalCost);
+    return totalCost;
+}
+
+//-------------------------------------------------------------------
+// setPumpStates:
+//   - interprets 'combo' as 3 bits and sets each pump ON/OFF
+//-------------------------------------------------------------------
+void setPumpStates(EN_Project ph, int combo)
+{
+    for (int p = 0; p < NUM_PUMPS; p++) {
+        int bitVal = (combo >> p) & 1;
+        double setting = (bitVal == 1) ? 1.0 : 0.0;
+        EN_setlinkvalue(ph, pumpLinkIds[p], EN_SETTING, setting);
+
+        printf("[setPumpStates] Pump %d (ID index %d): %s\n", 
+               p, pumpLinkIds[p], (bitVal == 1 ? "ON" : "OFF"));
+    }
 }
