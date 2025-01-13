@@ -1,97 +1,51 @@
 # Compiler
-CXX = mpicxx
+CXX       = mpicxx
 
-# Build type (default is debug)
-BUILD_TYPE ?= debug
+# Release compiler/linker flags
+CXXFLAGS  = -std=c++17 -Isrc -MMD -MP -fPIC -I/usr/include/nlohmann -fopenmp \
+            -O3 -DNDEBUG -march=native -funroll-loops -fomit-frame-pointer -flto
+LDFLAGS   = -flto -Wl,-rpath,'$$ORIGIN' -fopenmp
 
-# Base compiler flags
-CXXFLAGS_BASE = -std=c++17 -Isrc -MMD -MP -fPIC -I/usr/include/nlohmann -fopenmp # Add JSON library path here
+# Directories
+SRC_DIR   = src
+BUILD_DIR = build
 
-# Compiler flags for different build types
-ifeq ($(BUILD_TYPE), valgrind)
-    CXXFLAGS = $(CXXFLAGS_BASE) -g -O0
-    LDFLAGS = -Wl,-rpath,'$$ORIGIN' -fopenmp
-else ifeq ($(BUILD_TYPE), debug)
-    CXXFLAGS = $(CXXFLAGS_BASE) -g -pg
-    LDFLAGS = -pg -Wl,-rpath,'$$ORIGIN' -fopenmp
-else ifeq ($(BUILD_TYPE), release)
-    CXXFLAGS = $(CXXFLAGS_BASE) -O3 -DNDEBUG -march=native -funroll-loops -fomit-frame-pointer -flto
-    LDFLAGS = -flto -Wl,-rpath,'$$ORIGIN' -fopenmp
-else
-    $(error Invalid BUILD_TYPE specified. Use 'debug' or 'release'.)
-endif
+# Gather sources
+SRCS      = $(shell find $(SRC_DIR) -name '*.cpp')
+SRCS_EXE  = $(wildcard $(SRC_DIR)/CLI/*.cpp)
+SRCS_LIB  = $(filter-out $(SRCS_EXE), $(SRCS))
 
-# Libraries to link
-LIBS =
-
-# Optional filesystem library (for GCC < 8)
-FS_LIB =
-
-# Source directories
-SRC_DIR = src
-
-# Find all .cpp files in src/ and its subdirectories
-SRCS = $(shell find $(SRC_DIR) -name '*.cpp')
-
-# Separate library and executable source files
-SRCS_EXE = $(wildcard src/CLI/*.cpp)
-SRCS_LIB = $(filter-out $(SRCS_EXE), $(SRCS))
-
-# Object files for the library
-OBJS_LIB = $(patsubst %.cpp,$(BUILD_TYPE)/%.o,$(SRCS_LIB))
-
-# Object files for the executable
-OBJS_EXE = $(patsubst %.cpp,$(BUILD_TYPE)/%.o,$(SRCS_EXE))
-
-# Dependency files
-DEPS_LIB = $(OBJS_LIB:.o=.d)
-DEPS_EXE = $(OBJS_EXE:.o=.d)
+# Object files
+OBJS_LIB  = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS_LIB))
+OBJS_EXE  = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS_EXE))
 
 # Targets
-TARGET_LIB = $(BUILD_TYPE)/libepanet3.so
-TARGET_EXE = $(BUILD_TYPE)/run-epanet3
+TARGET_LIB = $(BUILD_DIR)/libepanet3.so
+TARGET_EXE = $(BUILD_DIR)/run-epanet3
+
+.PHONY: all clean
 
 # Default target
 all: $(TARGET_EXE)
 
-# Rule to build the shared library
+# Build the shared library
 $(TARGET_LIB): $(OBJS_LIB)
-	@mkdir -p $(BUILD_TYPE)
-	$(CXX) -shared -o $@ $(OBJS_LIB) $(LDFLAGS) $(LIBS) $(FS_LIB)
+	@mkdir -p $(dir $@)
+	$(CXX) -shared -o $@ $^ $(LDFLAGS)
 
-# Rule to build the executable
+# Build the executable
 $(TARGET_EXE): $(OBJS_EXE) $(TARGET_LIB)
-	@mkdir -p $(BUILD_TYPE)
-	$(CXX) -o $@ $(OBJS_EXE) -L$(BUILD_TYPE) -lepanet3 $(LDFLAGS) $(LIBS) $(FS_LIB)
+	@mkdir -p $(dir $@)
+	$(CXX) -o $@ $(OBJS_EXE) -L$(dir $(TARGET_LIB)) -lepanet3 $(LDFLAGS)
 
-run_debug: BUILD_TYPE = debug
-run_debug: $(TARGET_EXE)
-	./$(TARGET_EXE)
-
-run_release: BUILD_TYPE = release
-run_release: $(TARGET_EXE)
-	./$(TARGET_EXE) --h_max 12 --max_actuations 1 --interval_sync 2048 
-
-# Pattern rule to compile .cpp to .o and generate dependencies
-$(BUILD_TYPE)/%.o: %.cpp
+# Compile .cpp -> .o
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Clean up generated files
+# Cleanup
 clean:
-	rm -rf debug/* 
-	rm -rf release/*
+	rm -rf $(BUILD_DIR)
 
-# Include dependency files
--include $(DEPS_LIB)
--include $(DEPS_EXE)
-
-# Generate call tree using Valgrind's Callgrind tool and visualize it
-call_tree: BUILD_TYPE = valgrind
-call_tree: $(TARGET_EXE)
-	@mkdir -p valgrind
-	cd valgrind
-	valgrind --tool=callgrind ../$(TARGET_EXE) --test test_cost_1
-	gprof2dot -f callgrind callgrind.out.* > call_tree.dot
-
-.PHONY: all clean run_debug run_release call_tree
+# Include auto-generated dependency files
+-include $(OBJS_LIB:.o=.d) $(OBJS_EXE:.o=.d)
