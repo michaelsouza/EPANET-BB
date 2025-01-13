@@ -1,120 +1,97 @@
-# =============================================================================
-# Makefile for Epanet Project
-# Supports Debug and Release build modes
-# =============================================================================
+# Compiler
+CXX = mpicxx
 
-# -------------------------------
-# Compiler and Tools
-# -------------------------------
-CC      := gcc
-AR      := ar
-RM      := rm -rf
+# Build type (default is debug)
+BUILD_TYPE ?= debug
 
-# -------------------------------
-# Directories
-# -------------------------------
-INCLUDE_DIRS    := -Iinclude -Isrc -Isrc/include -Isrc/outfile/include -Isrc/util
-SRC_DIR         := src
-OUTFILE_SRC_DIR := src/outfile/src
-UTIL_DIR        := src/util
-RUN_DIR         := run
-BUILD_DIR       := build
+# Base compiler flags
+CXXFLAGS_BASE = -std=c++17 -Isrc -MMD -MP -fPIC -I/usr/include/nlohmann -fopenmp # Add JSON library path here
 
-# -------------------------------
-# Build Modes
-# -------------------------------
-# Default build mode is 'release'
-MODE ?= release
-
-ifeq ($(MODE),debug)
-    CFLAGS          := -Wall -g -O0 -DDEBUG $(INCLUDE_DIRS)
-    EXECUTABLE      := main_debug
-    BUILD_SUBDIR    := debug
-else ifeq ($(MODE),release)
-    CFLAGS          := -Wall -O2 $(INCLUDE_DIRS)
-    EXECUTABLE      := main
-    BUILD_SUBDIR    := release
+# Compiler flags for different build types
+ifeq ($(BUILD_TYPE), valgrind)
+    CXXFLAGS = $(CXXFLAGS_BASE) -g -O0
+    LDFLAGS = -Wl,-rpath,'$$ORIGIN' -fopenmp
+else ifeq ($(BUILD_TYPE), debug)
+    CXXFLAGS = $(CXXFLAGS_BASE) -g -pg
+    LDFLAGS = -pg -Wl,-rpath,'$$ORIGIN' -fopenmp
+else ifeq ($(BUILD_TYPE), release)
+    CXXFLAGS = $(CXXFLAGS_BASE) -O3 -DNDEBUG -march=native -funroll-loops -fomit-frame-pointer -flto
+    LDFLAGS = -flto -Wl,-rpath,'$$ORIGIN' -fopenmp
 else
-    $(error Unknown MODE: $(MODE). Use 'debug' or 'release'.)
+    $(error Invalid BUILD_TYPE specified. Use 'debug' or 'release'.)
 endif
 
-# Linker Flags (Add libraries here if needed)
-LDFLAGS         := -lm  # Added -lm to link the math library
+# Libraries to link
+LIBS =
 
-# -------------------------------
-# Source Files
-# -------------------------------
-SRC_FILES := \
-    $(SRC_DIR)/epanet2.c \
-    $(SRC_DIR)/epanet.c \
-    $(SRC_DIR)/flowbalance.c \
-    $(SRC_DIR)/genmmd.c \
-    $(SRC_DIR)/hash.c \
-    $(SRC_DIR)/hydcoeffs.c \
-    $(SRC_DIR)/hydraul.c \
-    $(SRC_DIR)/hydsolver.c \
-    $(SRC_DIR)/hydstatus.c \
-    $(SRC_DIR)/inpfile.c \
-    $(SRC_DIR)/input1.c \
-    $(SRC_DIR)/input2.c \
-    $(SRC_DIR)/input3.c \
-    $(SRC_DIR)/leakage.c \
-    $(SRC_DIR)/mempool.c \
-    $(SRC_DIR)/output.c \
-    $(SRC_DIR)/project.c \
-    $(SRC_DIR)/quality.c \
-    $(SRC_DIR)/qualreact.c \
-    $(SRC_DIR)/qualroute.c \
-    $(SRC_DIR)/report.c \
-    $(SRC_DIR)/rules.c \
-    $(SRC_DIR)/smatrix.c \
-    $(SRC_DIR)/validate.c \
-    $(OUTFILE_SRC_DIR)/epanet_output.c \
-    $(UTIL_DIR)/cstr_helper.c \
-    $(UTIL_DIR)/errormanager.c \
-    $(UTIL_DIR)/filemanager.c \
-    $(RUN_DIR)/main.c
+# Optional filesystem library (for GCC < 8)
+FS_LIB =
 
-# -------------------------------
-# Object Files
-# -------------------------------
-# Replace .c with .o and prefix with build directory
-OBJ_FILES := $(patsubst %.c,$(BUILD_DIR)/$(BUILD_SUBDIR)/%.o,$(SRC_FILES))
+# Source directories
+SRC_DIR = src
 
-# -------------------------------
+# Find all .cpp files in src/ and its subdirectories
+SRCS = $(shell find $(SRC_DIR) -name '*.cpp')
+
+# Separate library and executable source files
+SRCS_EXE = $(wildcard src/CLI/*.cpp)
+SRCS_LIB = $(filter-out $(SRCS_EXE), $(SRCS))
+
+# Object files for the library
+OBJS_LIB = $(patsubst %.cpp,$(BUILD_TYPE)/%.o,$(SRCS_LIB))
+
+# Object files for the executable
+OBJS_EXE = $(patsubst %.cpp,$(BUILD_TYPE)/%.o,$(SRCS_EXE))
+
+# Dependency files
+DEPS_LIB = $(OBJS_LIB:.o=.d)
+DEPS_EXE = $(OBJS_EXE:.o=.d)
+
 # Targets
-# -------------------------------
+TARGET_LIB = $(BUILD_TYPE)/libepanet3.so
+TARGET_EXE = $(BUILD_TYPE)/run-epanet3
 
 # Default target
-all: $(BUILD_DIR)/$(BUILD_SUBDIR)/$(EXECUTABLE)
+all: $(TARGET_EXE)
 
-# Link the executable
-$(BUILD_DIR)/$(BUILD_SUBDIR)/$(EXECUTABLE): $(OBJ_FILES)
+# Rule to build the shared library
+$(TARGET_LIB): $(OBJS_LIB)
+	@mkdir -p $(BUILD_TYPE)
+	$(CXX) -shared -o $@ $(OBJS_LIB) $(LDFLAGS) $(LIBS) $(FS_LIB)
+
+# Rule to build the executable
+$(TARGET_EXE): $(OBJS_EXE) $(TARGET_LIB)
+	@mkdir -p $(BUILD_TYPE)
+	$(CXX) -o $@ $(OBJS_EXE) -L$(BUILD_TYPE) -lepanet3 $(LDFLAGS) $(LIBS) $(FS_LIB)
+
+run_debug: BUILD_TYPE = debug
+run_debug: $(TARGET_EXE)
+	./$(TARGET_EXE)
+
+run_release: BUILD_TYPE = release
+run_release: $(TARGET_EXE)
+	./$(TARGET_EXE) --h_max 12 --max_actuations 1 --interval_sync 2048 
+
+# Pattern rule to compile .cpp to .o and generate dependencies
+$(BUILD_TYPE)/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-	@echo "Linked executable: $@"
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Compile source files to object files
-$(BUILD_DIR)/$(BUILD_SUBDIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-	@echo "Compiled: $< -> $@"
-
-# Phony Targets for build modes
-debug: MODE=debug
-debug: clean all
-	@echo "Built in DEBUG mode."
-
-release: MODE=release
-release: clean all
-	@echo "Built in RELEASE mode."
-
-# Clean the build directories
+# Clean up generated files
 clean:
-	$(RM) $(BUILD_DIR)
-	@echo "Cleaned build directories."
+	rm -rf debug/* 
+	rm -rf release/*
 
-# -------------------------------
-# Phony Declarations
-# -------------------------------
-.PHONY: all clean debug release
+# Include dependency files
+-include $(DEPS_LIB)
+-include $(DEPS_EXE)
+
+# Generate call tree using Valgrind's Callgrind tool and visualize it
+call_tree: BUILD_TYPE = valgrind
+call_tree: $(TARGET_EXE)
+	@mkdir -p valgrind
+	cd valgrind
+	valgrind --tool=callgrind ../$(TARGET_EXE) --test test_cost_1
+	gprof2dot -f callgrind callgrind.out.* > call_tree.dot
+
+.PHONY: all clean run_debug run_release call_tree
