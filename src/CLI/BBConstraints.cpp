@@ -224,8 +224,8 @@ bool BBConstraints::check_levels(Project &p, bool verbose)
     Console::printf(Console::Color::BRIGHT_WHITE, "]\n");
   }
 
-  const double level_min = 66.53;
-  const double level_max = 71.53;
+  const double level_min = 66.531;
+  const double level_max = 71.529;
   bool all_ok = true;
 
   for (const auto &tank : tanks)
@@ -383,10 +383,10 @@ BBPrune::Reason BBConstraints::check_feasibility(Project &p, int dt, const int h
   // This constraint is used in Cost2015 code. I'm not sure it's right. (TODO: check)
   // https://github.com/luishenrique-uva/branch-bound-epanet
   // commit 04a22c4f8eeb2909118910f70f5d74c3ef62f413
+  if (!check_levels(p, verbose)) return BBPrune::Reason::LEVELS;
   if (!check_timestep(dt, verbose)) return BBPrune::Reason::TIMESTEP;
   if (!check_cost(p, cost, verbose)) return BBPrune::Reason::COST;
   if (!check_pressures(p, verbose)) return BBPrune::Reason::PRESSURES;
-  if (!check_levels(p, verbose)) return BBPrune::Reason::LEVELS;
   return BBPrune::Reason::NONE;
 }
 

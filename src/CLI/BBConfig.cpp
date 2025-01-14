@@ -48,7 +48,7 @@ BBConfig::BBConfig(int argc, char *argv[])
   MPI_Comm_size(MPI_COMM_WORLD, &np);
 
   // Default input file
-  inpFile = "/home/michael/gitrepos/rs_JESSICA/networks/any-town.inp";
+  inpFile = "/home/michael/gitrepos/epanet-bb/networks/any-town.inp";
 
   // Parse command line arguments
   for (int i = 1; i < argc; ++i)
